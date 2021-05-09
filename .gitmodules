@@ -1,0 +1,3 @@
+[submodule "Impostor"]
+	path = Impostor
+	url = https://github.com/Impostor/Impostor.git

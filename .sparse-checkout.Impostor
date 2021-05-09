@@ -1,0 +1,8 @@
+.gitignore
+.gitattributes
+src/ProjectRules.ruleset
+src/Directory.Build.props
+src/stylecop.json
+src/Impostor.Api/
+src/Impostor.Hazel/
+docs/images/logo_64.png
