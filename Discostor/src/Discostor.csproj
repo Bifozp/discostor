@@ -1,0 +1,27 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net5.0</TargetFramework>
+
+    <Version>0.0.1</Version>
+    <AssemblyTitle>Discostor</AssemblyTitle>
+    <Authors>Bifozp</Authors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../../Impostor/src/Impostor.Api/Impostor.Api.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Discord.Net" Version="2.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="discostor.json">
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+    </Content>
+  </ItemGroup>
+
+</Project>

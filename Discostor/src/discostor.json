@@ -1,0 +1,48 @@
+{
+  "Discord": {
+    "Token": "",
+    "CommandPrefix": "!ds",
+    "RemoveCommand": true,
+    "MuteSpectator": true,
+    "TaskPhaseMuteRules": {
+      "Mute": {
+        "Dead": false,
+        "Alive": true
+      },
+      "Deaf": {
+        "Dead": false,
+        "Alive": true
+      }
+    },
+    "MeetingPhaseMuteRules": {
+      "Mute": {
+        "Dead": true,
+        "Alive": false
+      },
+      "Deaf": {
+        "Dead": false,
+        "Alive": false
+      }
+    },
+    "MuteDelays": {
+      "FromLobby": {
+        "ToLobby": 0,
+        "ToTask": 7000,
+        "ToMeeting": 0
+      },
+      "FromTask": {
+        "ToLobby": 1000,
+        "ToTask": 0,
+        "ToMeeting": 0
+      },
+      "FromMeeting": {
+        "ToLobby": 1000,
+        "ToTask": 7000,
+        "ToMeeting": 0
+      }
+    }
+  },
+  "Amongus": {
+    "CommandPrefix": "/ds"
+  }
+}

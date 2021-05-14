@@ -1,0 +1,73 @@
+name: release
+
+on:
+    push:
+        tags:
+            - 'v*'
+
+jobs:
+    release-build:
+        runs-on: ubuntu-latest
+        steps:
+
+            - uses: actions/checkout@v2
+              with:
+                  fetch-depth: 0
+
+            - uses: actions/setup-dotnet@v1
+              with:
+                  dotnet-version: '5.0.202'
+
+            - run: |
+                ./setup.sh
+                cd Discostor
+                ./build.sh -r
+
+            - name: 'set ver info'
+              run: |
+                  echo "VERSION=${GITHUB_REF#refs/*/}" >> $GITHUB_ENV
+                  echo "ZIP_NAME=${{ github.event.repository.name }}-${GITHUB_REF#refs/*/}.zip" >> $GITHUB_ENV
+
+            - name: Get commit summary
+              if: ${{ !env.ACT }}
+              id: get_commit_summary
+              run: |
+                  PREVIOUS_TAG=$(git tag --sort=-creatordate | sed -n 2p)
+                  echo "PREVIOUS_TAG: $PREVIOUS_TAG"
+                  COMMIT_SUMMARY="$(git log --oneline --pretty=tformat:"%h %s" $PREVIOUS_TAG..${{ github.ref }})"
+                  COMMIT_SUMMARY="${COMMIT_SUMMARY//$'\n'/'%0A'}"
+                  echo ::set-output name=COMMIT_SUMMARY::$COMMIT_SUMMARY
+
+            - name: archive
+              if: ${{ !env.ACT }}
+              run: |
+                cd Discostor/src/bin/Release/net5.0/publish
+                ls -l
+                zip -r ${{ env.ZIP_NAME }} *
+                mv ${{ env.ZIP_NAME }} ../../../../../..
+
+            - name: create release
+              id: create_release
+              if: ${{ !env.ACT }}
+              uses: actions/create-release@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  tag_name: ${{ github.ref }}
+                  release_name: Release ${{ env.VERSION }}
+                  draft: false
+                  prerelease: false
+                  body: |
+                      ${{ steps.get_commit_summary.outputs.COMMIT_SUMMARY }}
+
+            - name: upload release
+              if: ${{ !env.ACT }}
+              uses: actions/upload-release-asset@v1
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              with:
+                  upload_url: ${{ steps.create_release.outputs.upload_url }}
+                  asset_path: ./${{ env.ZIP_NAME}}
+                  asset_name: ${{ env.ZIP_NAME }}
+                  asset_content_type: application/zip
+
