@@ -1,5 +1,6 @@
 .gitignore
 .gitattributes
+/LICENSE
 /src/ProjectRules.ruleset
 /src/Directory.Build.props
 /src/stylecop.json
