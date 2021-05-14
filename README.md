@@ -8,7 +8,7 @@ This plugin was created with the goal of being usable in environments where cust
 ## Supported version
 
   | Discostor version | Impostor version | Download |
-  |:------------------|:-----------------|-----:----|
+  |:------------------|:-----------------|:--------:|
   | v0.1.0            | 1.4.0-dev        |          |
 
 
@@ -50,7 +50,7 @@ Once you have obtained the BOT token, put it in the "Token" section of "discosto
 ## Commands
 
  | Command     | Aliases | Arguments    | Description                                                                          | Example       |
- |:------------|------------------------|--------------------------------------------------------------------------------------|---------------|
+ |:------------|:-----------------------|:-------------------------------------------------------------------------------------|:--------------|
  | !ds help    | !ds h   | None         | Print help info and command usage                                                    |               |
  | !ds new     | !ds n   | GameCode     | Start a new game in the current text channel.                                        | `!ds n DBXYJ` |
  | !ds end     | !ds e   | None         | End the game entirely, and stop tracking players.                                    |               |
