@@ -24,5 +24,5 @@ jobs:
             - run: |
                 ./setup.sh
                 cd Discostor
-                ./build.sh -d -v
+                ./build.sh -d -c -v
 

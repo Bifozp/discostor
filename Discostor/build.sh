@@ -71,7 +71,7 @@ function Organize(){
 
     # Move files
     _command mv $PROJECT.dll plugins/
-    _command mv ${PROJECT,,}.json config/
+    _command mv ${PROJECT,,}.json ${PROJECT,,}-emotes.json config/
     _command mv *.dll libraries/
     _command cd -
 

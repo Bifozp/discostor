@@ -1,9 +1,6 @@
 ﻿using System;
-using System.Numerics;
-using System.Threading.Tasks;
 using Impostor.Api.Events;
 using Impostor.Api.Events.Player;
-using Impostor.Api.Innersloth.Customization;
 using Microsoft.Extensions.Logging;
 using Impostor.Plugins.Discostor.Mute;
 

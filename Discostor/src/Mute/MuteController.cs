@@ -4,8 +4,8 @@ using System.Timers;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using Microsoft.Extensions.Logging;
+using Discord;
 using Discord.WebSocket;
-using Discord.Rest;
 using Impostor.Api.Games;
 using Impostor.Api.Net;
 using Impostor.Api.Innersloth;
@@ -24,29 +24,34 @@ namespace Impostor.Plugins.Discostor.Mute
 
     internal class MuteController
     {
+        private const int DiscordFieldsCapacity = 25;
+
         private readonly ILogger<Discostor> _logger;
         private readonly IGame _game;
+        private readonly EmoteManager _emoteManager;
         private Dictionary<ulong, MuteState> _defaultVCProps
             = new Dictionary<ulong, MuteState>();
         private readonly DiscordBotConfig _config;
         private Timer _delayTimer = null;
         private PhaseTypes _phase;
         private Dictionary<int, bool> _isDead
-            = new Dictionary<int, bool>();
+            = new Dictionary<int, bool>(DiscordFieldsCapacity);
 
         // Amongus Player ID(int) <=> Discord ID(ulong)
         private Dictionary<int, ulong> _idConversionDict
-            = new Dictionary<int, ulong>();
+            = new Dictionary<int, ulong>(DiscordFieldsCapacity);
         // Discord ID(ulong) => Discord User
-        private Dictionary<ulong, SocketGuildUser> _guildMembersInVC
-            = new Dictionary<ulong, SocketGuildUser>();
+        private Dictionary<ulong, IGuildUser> _guildMembersInVC
+            = new Dictionary<ulong, IGuildUser>();
         // Player ID(int) => AmongUs Player
         private Dictionary<int, IClientPlayer> _players
-            = new Dictionary<int, IClientPlayer>();
-        private RestUserMessage _embedMsg;
+            = new Dictionary<int, IClientPlayer>(DiscordFieldsCapacity);
+        private IUserMessage _embedMsg;
+
+        private int _currentStamps = 0;
 
         internal SocketVoiceChannel VoiceChannel { get; }
-        internal RestUserMessage EmbedMsg { get{return _embedMsg;} }
+        internal IMessageChannel Channel { get{ return _embedMsg.Channel; } }
 
         internal bool IsAbandoned
         {
@@ -61,11 +66,13 @@ namespace Impostor.Plugins.Discostor.Mute
                 ILogger<Discostor> logger,
                 IGame game,
                 SocketGuildUser user,
-                DiscordBotConfig config)
+                DiscordBotConfig config,
+                EmoteManager emoteManager)
         {
             _logger = logger;
             _game = game;
             _config = config;
+            _emoteManager = emoteManager;
             VoiceChannel = user.VoiceChannel;
 
             _phase = PhaseTypes.Unknown;
@@ -100,7 +107,7 @@ namespace Impostor.Plugins.Discostor.Mute
             _logger.LogDebug($"MuteController created.");
         }
 
-        internal void JoinToVC(SocketGuildUser user)
+        internal void JoinToVC(IGuildUser user)
         {
             if(user.VoiceChannel.Id != VoiceChannel?.Id)
             {
@@ -113,20 +120,17 @@ namespace Impostor.Plugins.Discostor.Mute
             UpdateEmbedMonitor();
         }
 
-        internal void LeaveFromVC(SocketGuildUser user)
+        internal void LeaveFromVC(IGuildUser user)
         {
             _guildMembersInVC.Remove(user.Id, out var member);
 
-            // TODO: Restore code cleanup
-            var tsks = new List<Task>();
-            var ms = CreateCurrentMuteState(user);
-            var ds = _defaultVCProps[user.Id];
-            if(NeedMuteControl(user, ms, ds))
+            var nextMuteState = _defaultVCProps[user.Id];
+            if(NeedMuteControl(user, nextMuteState))
             {
-                tsks.Add( user.ModifyAsync(x =>
+                Task.Run(() => user.ModifyAsync(x =>
                 {
-                    x.Mute = ds.Mute;
-                    x.Deaf = ds.Deaf;
+                    x.Mute = nextMuteState.Mute;
+                    x.Deaf = nextMuteState.Deaf;
                 }));
             }
             _defaultVCProps.Remove(user.Id);
@@ -137,10 +141,9 @@ namespace Impostor.Plugins.Discostor.Mute
                 _idConversionDict.Remove(playerId.Key);
                 Task.WhenAll(_embedMsg.Channel.SendMessageAsync($"{user.Mention} has left."));
             }
-            _logger.LogInformation($"[Discord] \"{user.Username}\" leaved from game {_game.Code.Code}.");
+            _logger.LogInformation($"[Discord] \"{user.Username}#{user.Discriminator}\" leaved from game {_game.Code.Code}.");
             PutInternalInfo();
             UpdateEmbedMonitor();
-            Task.WhenAll(tsks);
         }
 
         internal void JoinToGame(IClientPlayer player)
@@ -155,6 +158,7 @@ namespace Impostor.Plugins.Discostor.Mute
             bool isDead = false;
             if(null != pi) isDead = pi.IsDead;
             _isDead[player.Client.Id] = isDead;
+            _logger.LogInformation($"\"[among us] {player.Client.Name}\" joined to game {_game.Code.Code}.");
         }
 
         internal void LeaveFromGame(IClientPlayer player)
@@ -168,7 +172,7 @@ namespace Impostor.Plugins.Discostor.Mute
             }
             PutInternalInfo();
             UpdateEmbedMonitor();
-            _logger.LogInformation($"\"[among us] {player.Character.PlayerInfo.PlayerName}\" leaved from game {_game.Code.Code}.");
+            _logger.LogInformation($"\"[among us] {player.Client.Name}\" leaved from game {_game.Code.Code}.");
         }
 
         internal void PlayerSpawned()
@@ -177,74 +181,131 @@ namespace Impostor.Plugins.Discostor.Mute
             UpdateEmbedMonitor();
         }
 
-        internal bool LinkUserAndPlayer(SocketGuildUser user, int playerIndex, bool force=false)
+        internal bool LinkUserAndPlayer(IGuildUser user, int monitorIndex, bool force=false)
         {
+            if(monitorIndex >= _players.Count)
+            {
+                _logger.LogInformation($"player[{monitorIndex}] not found");
+                return false;
+            }
             if(_idConversionDict.Values.Contains(user.Id))
             {
-                _logger.LogInformation("二重登録になるため失敗");
-                return false;
-            }
-            if(playerIndex >= _players.Count)
-            {
-                _logger.LogInformation($"player[{playerIndex}] not found");
-                return false;
-            }
-            var vt = _players.ToArray();
-            var v = vt[playerIndex];
-            if(_idConversionDict.TryGetValue(v.Key, out var uid))
-            {
-                _logger.LogInformation($"割当あり - {_players[v.Key]} => {_guildMembersInVC[uid]}");
+                _logger.LogInformation($"\"{user.Username}#{user.Discriminator}\" is already linked.");
                 return false;
             }
 
-            _idConversionDict[v.Key] = user.Id;
-            _defaultVCProps[user.Id] = CreateCurrentMuteState(user);
+            var playerId = _players.Keys.ToArray()[monitorIndex];
+            if(_idConversionDict.TryGetValue(playerId, out var uid))
+            {
+                if(!force) return false;
+                UnlinkCommon(user, uid, playerId, true);
+            }
 
+            LinkCommon(user, playerId);
             PutInternalInfo();
             UpdateEmbedMonitor();
-            var playerName = _players[v.Key].Client.Name;
-            _logger.LogInformation($"Player linked: {playerName} => {user.Username}");
             return true;
         }
 
-        internal bool UnlinkUserAndPlayer(SocketGuildUser user, int playerIndex, bool force=false)
+        internal bool UnlinkUserAndPlayer(IGuildUser user, int monitorIndex, bool force=false)
         {
-            if(playerIndex >= _players.Count)
+            if(monitorIndex >= _players.Count)
             {
-                _logger.LogInformation($"player[{playerIndex}] not found");
+                _logger.LogInformation($"player[{monitorIndex}] not found");
                 return false;
             }
-            var pids = _players.Keys.ToArray();
-            var pid = pids[playerIndex];
-            if(_idConversionDict.TryGetValue(pid, out var uid))
+            var playerId = _players.Keys.ToArray()[monitorIndex];
+            if(_idConversionDict.TryGetValue(playerId, out var uid))
             {
-                if(uid != user.Id)
+                if(UnlinkCommon(user, uid, playerId))
                 {
-                    _logger.LogInformation($"他人指定 - {_players[pid]} => {_guildMembersInVC[uid]}");
-                    if(!force) return false;
+                    PutInternalInfo();
+                    UpdateEmbedMonitor();
+                    return true;
                 }
-
-                // TODO:Restore code cleanup
-                var tsks = new List<Task>();
-                var ms = CreateCurrentMuteState(user);
-                var ds = _defaultVCProps[user.Id];
-                if(NeedMuteControl(user, ms, ds))
-                {
-                    tsks.Add( user.ModifyAsync(x =>
-                    {
-                        x.Mute = ds.Mute;
-                        x.Deaf = ds.Deaf;
-                    }));
-                }
-                _defaultVCProps.Remove(user.Id);
-                _idConversionDict.Remove(pid);
-                PutInternalInfo();
-                UpdateEmbedMonitor();
-                Task.WhenAll(tsks);
-                return true;
+                return false;
             }
-            _logger.LogInformation($"割当なし - {_players[pid]}");
+            _logger.LogInformation($"Not linked. - {user.Username}#{user.Discriminator} =x= {_players[playerId].Client.Name}");
             return false;
+        }
+
+        internal bool ToggleLink(IGuildUser user, IUserMessage msg, IEmote emote)
+        {
+            // Whether the message is for a game or not
+            if(msg.Id != _embedMsg.Id) return false;
+
+            // Whether the index of the reaction is in range or not
+            var monitorIndex = _emoteManager.GetIndex(emote.Name);
+            _logger.LogDebug($"inx ({monitorIndex})");
+            if(monitorIndex == -1) return false; // normal reaction
+            if(monitorIndex >= _players.Count)
+            {
+                _logger.LogInformation($"player[{monitorIndex}] not found");
+                return false;
+            }
+
+            // Check OK, attempt to operate the user.
+
+            // Check link or unlink
+            var playerId = _players.Keys.ToArray()[monitorIndex];
+            if(_idConversionDict.TryGetValue(playerId, out var uid))
+            {  // Link found, unlink
+                if(UnlinkCommon(user, uid, playerId))
+                {
+                    PutInternalInfo();
+                    UpdateEmbedMonitor();
+                    return true;
+                }
+                return false;
+            }
+
+            // Link not found, create new link.
+
+            if(_idConversionDict.Values.Contains(user.Id))
+            {
+                _logger.LogInformation($"\"{user.Username}#{user.Discriminator}\" is already linked.");
+                return false;
+            }
+
+            LinkCommon(user, playerId);
+            PutInternalInfo();
+            UpdateEmbedMonitor();
+            return true;
+        }
+
+        private void LinkCommon(IGuildUser user, int playerId)
+        {
+            _idConversionDict[playerId] = user.Id;
+            _defaultVCProps[user.Id] = CreateCurrentMuteState(user);
+
+            var playerName = _players[playerId].Client.Name;
+            _logger.LogInformation($"O Player linked: {playerName} <=o=> {user.Username}");
+        }
+
+        private bool UnlinkCommon(IGuildUser user, ulong foundId, int playerId, bool force=false)
+        {
+            if(user.Id != foundId)
+            {
+                _logger.LogInformation($"There is already a link to the other user. - {_players[playerId]} => {_guildMembersInVC[foundId]}");
+                if(!force) return false;
+                _logger.LogWarning($"Forcibly disconnect.");
+            }
+
+            // Unmute and unlink
+            var nextMuteState = _defaultVCProps[user.Id];
+            if(NeedMuteControl(user, nextMuteState))
+            {
+                Task.Run(() => user.ModifyAsync(x =>
+                {
+                    x.Mute = nextMuteState.Mute;
+                    x.Deaf = nextMuteState.Deaf;
+                }));
+            }
+            _defaultVCProps.Remove(user.Id);
+            _idConversionDict.Remove(playerId);
+            var playerName = _players[playerId].Client.Name;
+            _logger.LogInformation($"X Player unlinked: {playerName} <=x=> {user.Username}");
+            return true;
         }
 
         internal void RestoreMuteControl(int delay)
@@ -282,14 +343,13 @@ namespace Impostor.Plugins.Discostor.Mute
             var mtasks = new List<Task>();
             foreach(var user in _guildMembersInVC.Values)
             {
-                var curState = CreateCurrentMuteState(user);
-                MuteState newState = CreateNextMuteState(user, muteType);
-                if(NeedMuteControl(user, curState, newState))
+                var nextMuteState = CreateNextMuteState(user, muteType);
+                if(NeedMuteControl(user, nextMuteState))
                 {
                     mtasks.Add(user.ModifyAsync(x =>
                     {
-                        x.Mute = newState.Mute;
-                        x.Deaf = newState.Deaf;
+                        x.Mute = nextMuteState.Mute;
+                        x.Deaf = nextMuteState.Deaf;
                     }));
                 }
             }
@@ -299,8 +359,7 @@ namespace Impostor.Plugins.Discostor.Mute
             }
             catch(Exception e)
             {
-                _logger.LogError($"{e.GetType().Name} -- {e.Message}");
-                _logger.LogError($"{e.StackTrace}");
+                LogStackTrace(e, "CommonMuteControl");
             }
             _delayTimer?.Stop();
             _delayTimer?.Dispose();
@@ -326,14 +385,17 @@ namespace Impostor.Plugins.Discostor.Mute
 
         internal void SyncDeadStatus()
         {
-            foreach(var p in _game.Players)
-            {//
-                _isDead[p.Client.Id] = p.Character.PlayerInfo.IsDead;
+            if(_game.GameState == GameStates.Started)
+            {
+                foreach(var p in _game.Players)
+                {
+                    _isDead[p.Client.Id] = p.Character.PlayerInfo.IsDead;
+                }
             }
         }
 
         // Get current mute state
-        private MuteState CreateCurrentMuteState(SocketGuildUser user)
+        private MuteState CreateCurrentMuteState(IGuildUser user)
         {
             var state = new MuteState();
             state.Deaf = user.IsDeafened;
@@ -341,7 +403,7 @@ namespace Impostor.Plugins.Discostor.Mute
             return state;
         }
 
-        private MuteState CreateNextMuteState(SocketGuildUser user, MuteType muteType)
+        private MuteState CreateNextMuteState(IGuildUser user, MuteType muteType)
         {
             // set default state
             _logger.LogDebug($"{user.Username} mute conf");
@@ -358,18 +420,17 @@ namespace Impostor.Plugins.Discostor.Mute
                 {
                     _logger.LogDebug($"{user.Username} found in conversion list");
                     isDead = _isDead[cnvInfo.Key];
-                    //var name = player.Character.PlayerInfo.PlayerName;
-                    //_logger.LogDebug($"プレイヤー => {name}({user.Username}) is dead: {isDead}");
+                    var name = _players[cnvInfo.Key].Client.Name;
+                    _logger.LogDebug($"Player => {name}({user.Username}) is dead: {isDead}");
                 }
                 catch(Exception e)
                 {
-                    _logger.LogError($"{e.GetType()} -- {e.Message}");
-                    _logger.LogError($"{e.StackTrace}");
+                    LogStackTrace(e, "CreateNextMuteState");
                 }
             }
             else
             {
-                _logger.LogInformation($"観客 => {user.Username}");
+                _logger.LogInformation($"Spectator => {user.Username}");
             }
 
             // Apply mute rule
@@ -383,7 +444,7 @@ namespace Impostor.Plugins.Discostor.Mute
             return ms;
         }
 
-        private bool NeedMuteControl(SocketGuildUser user, MuteState before, MuteState after)
+        private bool NeedMuteControl(IGuildUser user, MuteState before, MuteState after)
         {
             if(_config.MuteSpectator || _idConversionDict.Values.Contains(user.Id))
             {
@@ -395,15 +456,19 @@ namespace Impostor.Plugins.Discostor.Mute
             return false;
         }
 
-        internal async Task<RestUserMessage> GenerateEmbedMsg(ISocketMessageChannel ch)
+        private bool NeedMuteControl(IGuildUser user, MuteState after)
+            => NeedMuteControl(user, CreateCurrentMuteState(user), after);
+
+        internal async Task<IUserMessage> GenerateEmbedMsg(ISocketMessageChannel ch)
         {
             var embed = CreateBuilder()?.Build();
             var emsg = await ch.SendMessageAsync(embed:embed);
             _embedMsg = emsg;
+            await Task.Run(AddMuteStamps);
             return emsg;
         }
 
-        internal async Task RefreshEmbed()
+        internal async Task RefreshEmbedAsync()
         {
             var ch = _embedMsg.Channel as ISocketMessageChannel;
             var embedTask = GenerateEmbedMsg(ch);
@@ -412,7 +477,12 @@ namespace Impostor.Plugins.Discostor.Mute
                 _embedMsg.DeleteAsync()
             );
             _embedMsg = await embedTask;
+            _currentStamps = 0;
+            await Task.Run(AddMuteStamps);
         }
+
+        internal async Task DeleteEmbedAsync()
+            => await _embedMsg.DeleteAsync();
 
         private void UpdateEmbedMonitor()
         {
@@ -421,11 +491,12 @@ namespace Impostor.Plugins.Discostor.Mute
 
             var embed = CreateBuilder()?.Build();
             Task.Run(()=>_embedMsg.ModifyAsync(x=>{x.Embed=embed;}));
+            Task.Run(AddMuteStamps);
         }
 
         private MonitorEmbedBuilder CreateBuilder()
         {
-            var builder = new MonitorEmbedBuilder(_logger);
+            var builder = new MonitorEmbedBuilder(_logger, _emoteManager);
             try
             {
                 builder.GameCode = _game.Code.Code;
@@ -475,10 +546,34 @@ namespace Impostor.Plugins.Discostor.Mute
             }
             catch(Exception e)
             {
-                _logger.LogError($"{e.GetType()} - {e.Message}");
-                _logger.LogError($"{e.StackTrace}");
+                LogStackTrace(e, "CreateBuilder");
             }
             return builder;
+        }
+
+        private async Task AddMuteStamps()
+        {
+            var emotes = _emoteManager.Emotes;
+            var eml = new List<IEmote>();
+            while(_currentStamps < _players.Count)
+            {
+                _logger.LogDebug($"add emoji({_currentStamps})");
+                //eml.Add(new Emoji(emotes[_currentStamps]));
+                var e = _emoteManager.GetEmote(_currentStamps);
+                eml.Add(e);
+                _currentStamps++;
+            }
+            await _embedMsg.AddReactionsAsync(eml.ToArray());
+        }
+
+        private void LogStackTrace(Exception e, string scope)
+        {
+            _logger.LogError($"{e.GetType()} -- {e.Message}");
+            _currentStamps = 0;
+            using(_logger.BeginScope(scope))
+            {
+                _logger.LogError(e.StackTrace);
+            }
         }
 
         private void PutInternalInfo()
@@ -506,7 +601,14 @@ namespace Impostor.Plugins.Discostor.Mute
                     _logger.LogDebug($"discord({ids.Value}) -> ({ids.Key})");
                 }
             }
-            catch(Exception){}
+            catch(Exception e)
+            {
+                _logger.LogDebug($"{e.GetType()} -- {e.Message}");
+                using(_logger.BeginScope("PutInternalInfo"))
+                {
+                    _logger.LogDebug(e.StackTrace);
+                }
+            }
         }
     }
 }

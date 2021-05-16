@@ -39,28 +39,25 @@ namespace Impostor.Plugins.Discostor.Discord.Commands
         {
             if(Context.IsPrivate)
             {
-                await ReplyAsync("プライベートメッセージでは機能しません");
+                await ReplyAsync("Cannot be used with DM.");
                 return;
             }
 
             var user = Context.Message.Author as SocketGuildUser;
             if(user?.VoiceChannel == null)
             {
-                // TODO
-                await ReplyAsync($"{Context.User.Mention} このサーバーのボイスチャンネルに参加してください");
+                await ReplyAsync($"{Context.User.Mention} Please join the voice chat on this server.");
                 return;
             }
             if(user.VoiceChannel.Guild.Id != Context.Guild.Id)
             {
-                // TODO
-                // Remarks: 通常このルートに来ることはない
-                await ReplyAsync("参加中のボイスチャットとテキストチャットのサーバーが異なります");
+                // Remarks: Usually, the program never reaches this point.
+                await ReplyAsync("The servers for voice chat and text chat are different.");
                 return;
             }
-            if(_automuteService.VCLinkedGames.TryGetValue(user.VoiceChannel.Id, out var c))
+            if(_automuteService.VCLinkedGames.TryGetValue(user.VoiceChannel.Id, out var gameCode))
             {
-                // TODO
-                await ReplyAsync($":speaker: \"{user.VoiceChannel.Name}\" は、既にGame `{c}` とリンクしています");
+                await ReplyAsync($":speaker: \"{user.VoiceChannel.Name}\" is already paired with game `{gameCode}`.");
                 return;
             }
 
@@ -68,6 +65,7 @@ namespace Impostor.Plugins.Discostor.Discord.Commands
             if(string.IsNullOrEmpty(code))
             {
             // Remarks: Commented out because there is no API to destroy the game.
+            // If this code is enabled, the game may continue to remain.
 #if false
                 game = await _gameManager.CreateAsync(new GameOptionsData());
                 game.DisplayName = $"created by {user}";
@@ -80,12 +78,11 @@ namespace Impostor.Plugins.Discostor.Discord.Commands
                 );
                 embedMsg = await embedTask as RestUserMessage;
 #else
-                // TODO
-                await ReplyAsync("ゲームコードを入力してください");
+                await ReplyAsync("Enter the game code.");
                 return;
 #endif
             }
-            // Create
+            // Create a mute controller to pair with the game.
             await _automuteService.CreateMuteController(Context.Message, code);
         }
     }

@@ -12,6 +12,12 @@ This plugin was created with the goal of being usable in environments where cust
   | v0.1.0            | 1.4.0-dev        |          |
 
 
+## Feature
+
+This plugin manages the mute state by player ID instead of player color.
+
+Therefore, it also supports play with a mod that adds player colors.
+
 ## Usage
 
   Get the latest release from the releases page and put the contents of the zip in your Impostor folder.
@@ -80,6 +86,13 @@ cd Discostor/
 cd Discostor
 ./run.sh
 ```
+
+## TODO
+
+  - [ ] Requesting a mute using a queue
+  - [ ] Language
+  - [ ] Distributed processing using worker clients
+  - [ ] More documentation !!!!!!!
 
 ## Similar Projects
 

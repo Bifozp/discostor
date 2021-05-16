@@ -10,6 +10,7 @@ namespace Impostor.Plugins.Discostor.Discord
     internal class MonitorEmbedBuilder
     {
         private readonly ILogger<Discostor> _logger;
+        private readonly EmoteManager _emoteManager;
 
         internal string GameCode { get; set; }
         internal PhaseTypes Phase { get; set; }
@@ -20,10 +21,12 @@ namespace Impostor.Plugins.Discostor.Discord
         internal GameOptionsData GameOption { get; set; }
 
         public MonitorEmbedBuilder(
-                ILogger<Discostor> logger
+                ILogger<Discostor> logger,
+                EmoteManager emoteManager
                 )
         {
             _logger = logger;
+            _emoteManager = emoteManager;
         }
 
         internal Embed Build()
@@ -60,14 +63,15 @@ namespace Impostor.Plugins.Discostor.Discord
             if(Players.Count == 0)
             {
                 embed.WithColor(Color.Red);
-                embed.AddField("プレイヤーはいません", $"ゲーム `{GameCode}` に参加してみましょう");
+                embed.AddField("There are no players", $"Let's join and play the game `{GameCode}`.");
             }
             else
             {
-                var fid = 1;
+                var fid = 0;
                 foreach(var p in Players)
                 {
-                    var title = $"({fid}) ";
+                    var emo = _emoteManager.GetEmote(fid);
+                    var title = $"{emo} ";
                     title += p.IsDead ? $"~~{p.PlayerName}~~" : p.PlayerName;
                     var body = string.IsNullOrEmpty(p.DiscordUserName) ? "-" : p.DiscordUserName;
                     embed.AddField(title, body, true);

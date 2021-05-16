@@ -21,7 +21,7 @@ jobs:
             - run: |
                 ./setup.sh
                 cd Discostor
-                ./build.sh -r
+                ./build.sh -c -r
 
             - name: 'set ver info'
               run: |

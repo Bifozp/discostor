@@ -1,9 +1,10 @@
 {
   "Discord": {
     "Token": "",
+    "MessageCacheSize": 100,
     "CommandPrefix": "!ds",
-    "RemoveCommand": true,
-    "MuteSpectator": true,
+    "DeleteConfirmedCommand": true,
+    "MuteSpectator": false,
     "TaskPhaseMuteRules": {
       "Mute": {
         "Dead": false,
@@ -27,17 +28,17 @@
     "MuteDelays": {
       "FromLobby": {
         "ToLobby": 0,
-        "ToTask": 7000,
+        "ToTask": 1000,
         "ToMeeting": 0
       },
       "FromTask": {
         "ToLobby": 1000,
         "ToTask": 0,
-        "ToMeeting": 0
+        "ToMeeting": 1000
       },
       "FromMeeting": {
         "ToLobby": 1000,
-        "ToTask": 7000,
+        "ToTask": 10000,
         "ToMeeting": 0
       }
     }

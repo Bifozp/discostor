@@ -41,12 +41,13 @@ namespace Impostor.Plugins.Discostor.Discord
         public async Task StartAsync(CancellationToken cancellationToken)
         {
             _logger.LogInformation("Discostor bot service is starting...");
-            _mainClient.Ready += onReady;
-            _mainClient.MessageReceived += onMessageReceived;
-            _mainClient.UserVoiceStateUpdated += onUserVoiceStateUpdated;
+            _mainClient.Ready += OnReadyAsync;
+            _mainClient.MessageReceived += OnMessageReceivedAsync;
+            _mainClient.ReactionAdded += OnReactionAdded;
+            _mainClient.UserVoiceStateUpdated += OnUserVoiceStateUpdatedAsync;
             _mainClient.Log += onLogging;
             _comms.Log += onLogging;
-            _comms.CommandExecuted += onCommandExecuted;
+            _comms.CommandExecuted += OnCommandExecutedAsync;
             await _comms.AddModulesAsync(Assembly.GetExecutingAssembly(), _services);
             await _mainClient.LoginAsync(TokenType.Bot, _config.Token);
             await _mainClient.StartAsync();
@@ -58,12 +59,13 @@ namespace Impostor.Plugins.Discostor.Discord
             await _mainClient.SetGameAsync(null);
             await _mainClient.SetStatusAsync(UserStatus.Offline);
             await _mainClient.StopAsync();
-            _comms.CommandExecuted -= onCommandExecuted;
+            _comms.CommandExecuted -= OnCommandExecutedAsync;
             _comms.Log -= onLogging;
             _mainClient.Log -= onLogging;
-            _mainClient.UserVoiceStateUpdated -= onUserVoiceStateUpdated;
-            _mainClient.MessageReceived -= onMessageReceived;
-            _mainClient.Ready -= onReady;
+            _mainClient.UserVoiceStateUpdated -= OnUserVoiceStateUpdatedAsync;
+            _mainClient.ReactionAdded -= OnReactionAdded;
+            _mainClient.MessageReceived -= OnMessageReceivedAsync;
+            _mainClient.Ready -= OnReadyAsync;
         }
 
         public void Dispose()
@@ -71,11 +73,13 @@ namespace Impostor.Plugins.Discostor.Discord
             _mainClient?.Dispose();
         }
 
-        private async Task onReady()
+        private async Task OnReadyAsync()
         {
             var cmdHelp = _config.CommandPrefix + "help";
-            await _mainClient.SetStatusAsync(UserStatus.Online);
-            await _mainClient.SetGameAsync($"type {cmdHelp} for help");
+            await Task.WhenAll(
+                _mainClient.SetStatusAsync(UserStatus.Online),
+                _mainClient.SetGameAsync(cmdHelp)
+            );
         }
 
         private async Task onLogging(LogMessage log)
@@ -84,7 +88,7 @@ namespace Impostor.Plugins.Discostor.Discord
             await Task.CompletedTask;
         }
 
-        private async Task onMessageReceived(SocketMessage msgParam)
+        private async Task OnMessageReceivedAsync(SocketMessage msgParam)
         {
             var msg = msgParam as SocketUserMessage;
             // Don't process system msg
@@ -117,7 +121,7 @@ namespace Impostor.Plugins.Discostor.Discord
                 var builder = _services.GetService(typeof(HelpEmbedBuilder)) as HelpEmbedBuilder;
                 var embed = builder.Build();
                 tasks.Add(msg.Channel.SendMessageAsync(embed:embed));
-                if(_config.RemoveCommand && msg.Channel is not IPrivateChannel)
+                if(_config.DeleteConfirmedCommand && msg.Channel is not IPrivateChannel)
                 {
                     tasks.Add(msg.Channel.DeleteMessageAsync(msg));
                 }
@@ -131,21 +135,68 @@ namespace Impostor.Plugins.Discostor.Discord
                     context: context,
                     argPos: argPos,
                     services: _services);
-            if(_config.RemoveCommand && msg.Channel is not IPrivateChannel)
+            if(_config.DeleteConfirmedCommand && msg.Channel is not IPrivateChannel)
             {
                 await msg.Channel.DeleteMessageAsync(msg);
             }
             var result = await resultTask;
             if(!result.IsSuccess)
             {
-                var cmd = getCmd(msg.Content, argPos, SplitChar);
+                var cmd = TrimCommand(msg.Content, argPos, SplitChar);
                 await msg.Channel.SendMessageAsync($"failed to execute `{cmd}` command. ({result.ErrorReason})");
             }
         }
 
-        private async Task onUserVoiceStateUpdated(SocketUser userParam, SocketVoiceState vsPrev, SocketVoiceState vsNew)
+        private async Task OnReactionAdded(Cacheable<IUserMessage, ulong> cache, ISocketMessageChannel ch, SocketReaction reaction)
         {
-            var user = userParam as SocketGuildUser;
+            var dlTasks = new List<Task>();
+            IUserMessage msg = null;
+            Task<IUserMessage> msgTask = null;
+            if(cache.HasValue)
+            {
+                msg = cache.Value;
+            }
+            else
+            {
+                msgTask = cache.DownloadAsync();
+                dlTasks.Add(msgTask);
+            }
+
+            IGuildUser user = null;
+            Task<IUser> userTask = null;
+            if(reaction.User.IsSpecified)
+            {
+                user = reaction.User.Value as IGuildUser;
+            }
+            else
+            {
+                userTask = ch.GetUserAsync(reaction.UserId);
+                dlTasks.Add(userTask);
+            }
+            await Task.WhenAll(dlTasks);
+            if(msg  == null) msg  = await msgTask;
+            if(user == null) user = await userTask as IGuildUser;
+
+            // Don't process bot reaction
+            if (user.IsBot || user.IsWebhook) return;
+
+            try{
+                _logger.LogDebug($"{user.Username}#{user.Discriminator}> reaction {reaction.Emote.Name}");
+                var code = _automuteService.GetVCLinkedGameCode(user.VoiceChannel);
+                if(code is null)
+                {
+                    return;
+                }
+                await _automuteService.OnReactionAdded(msg, user, reaction, code);
+            }catch(Exception e){
+                _logger.LogDebug($"{e.GetType()} -- {e.Message}");
+                using(_logger.BeginScope("")){ _logger.LogDebug(e.StackTrace); }
+            }
+        }
+
+        private async Task OnUserVoiceStateUpdatedAsync(SocketUser userParam, SocketVoiceState vsPrev, SocketVoiceState vsNew)
+        {
+            var user = userParam as IGuildUser;
             if(user == null)
             {
                 _logger.LogInformation($"user \"{user.Username}\" isn't guild user.");
@@ -161,14 +212,14 @@ namespace Impostor.Plugins.Discostor.Discord
             await Task.CompletedTask;
         }
 
-        private async Task onCommandExecuted(Optional<CommandInfo> cmd, ICommandContext ctx, IResult result)
+        private async Task OnCommandExecutedAsync(Optional<CommandInfo> cmd, ICommandContext ctx, IResult result)
         {
             var user = ctx.Message.Author;
             _logger.LogInformation($"{user.Username}#{user.Discriminator} > executed {ctx.Message.Content} ({result})");
             await Task.CompletedTask;
         }
 
-        private string getCmd(string s, int argPos, char splitter)
+        private string TrimCommand(string s, int argPos, char splitter)
         {
             var inx = s.IndexOf(splitter, argPos);
             if(inx == -1)

@@ -43,14 +43,14 @@ namespace Impostor.Plugins.Discostor.Discord.Commands
         {
             if(Context.IsPrivate)
             {
-                await ReplyAsync("プライベートメッセージでは機能しません");
+                await ReplyAsync("Cannot be used with DM.");
                 return;
             }
 
             var user = Context.Message.Author as SocketGuildUser;
             if(user?.VoiceChannel == null)
             {
-                await ReplyAsync($"{Context.User.Mention} ボイスチャンネルに参加してください");
+                await ReplyAsync($"{Context.User.Mention} Please join the voice chat on this server.");
                 return;
             }
 
@@ -75,8 +75,7 @@ namespace Impostor.Plugins.Discostor.Discord.Commands
                 }
                 return;
             }
-            // TODO
-            await ReplyAsync($":speaker: \"{user.VoiceChannel.Name}\" に対応するゲームが見つかりません");
+            await ReplyAsync($":speaker: \"{user.VoiceChannel.Name}\" > There are no games to pair with.");
         }
     }
 }

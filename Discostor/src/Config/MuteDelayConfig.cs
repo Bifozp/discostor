@@ -1,4 +1,3 @@
-using System.Text.Json.Serialization;
 namespace Impostor.Plugins.Discostor.Config
 {
     public class MuteDelayConfigChild
@@ -15,8 +14,8 @@ namespace Impostor.Plugins.Discostor.Config
 
     public class MuteDelayConfig
     {
-        public MuteDelayConfigChild FromLobby   { get; set; } = new MuteDelayConfigChild(   0, 6000,    0);
-        public MuteDelayConfigChild FromTask    { get; set; } = new MuteDelayConfigChild(1000,    0,    0);
-        public MuteDelayConfigChild FromMeeting { get; set; } = new MuteDelayConfigChild(1000, 6000,    0);
+        public MuteDelayConfigChild FromLobby   { get; set; } = new MuteDelayConfigChild(    0,  1000,     0);
+        public MuteDelayConfigChild FromTask    { get; set; } = new MuteDelayConfigChild( 1000,     0,  1000);
+        public MuteDelayConfigChild FromMeeting { get; set; } = new MuteDelayConfigChild( 1000, 10000,     0);
     }
 }

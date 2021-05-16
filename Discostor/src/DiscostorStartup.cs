@@ -20,10 +20,14 @@ namespace Impostor.Plugins.Discostor
         public void ConfigureServices(IServiceCollection services)
         {
             // Config
-            services.AddSingleton<ConfigRoot>( cfg => ConfigRoot.Build("discostor.json") );
+            services.AddSingleton<ConfigRoot>(_ => new ConfigBuilder<ConfigRoot>().Build("discostor.json") );
 
-            // Discord bot
-            services.AddSingleton<DiscordSocketClient>();
+            // Emote config
+            services.AddSingleton<EmoteConfig>(_ => new ConfigBuilder<EmoteConfig>().Build("discostor-emotes.json") );
+            services.AddSingleton<EmoteManager>();
+
+            // Discord bot services
+            services.AddSingleton<DiscordSocketClient>(x => ClientBuilder.Build(x));
             services.AddSingleton<CommandService>();
             services.AddSingleton<AutomuteService>();
             services.AddTransient<HelpEmbedBuilder>();

@@ -21,12 +21,14 @@ namespace Impostor.Plugins.Discostor
         public override async ValueTask EnableAsync()
         {
             _logger.LogInformation("Discostor is being enabled.");
-
+#if DEBUG
             var game = await _gameManager.CreateAsync(new GameOptionsData());
             game.DisplayName = "Example game";
             await game.SetPrivacyAsync(true);
 
             _logger.LogInformation("Created game {0}.", game.Code.Code);
+#endif
+            await Task.CompletedTask;
         }
 
         public override ValueTask DisableAsync()
